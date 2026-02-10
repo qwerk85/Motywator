@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Licznik zarobków – real-time + przyspieszacz</title>
+  <style>
+    :root{
+      --bg:#0f172a; --panel:#111827; --text:#e5e7eb; --muted:#94a3b8;
+      --accent:#22c55e; --accent-2:#06b6d4; --danger:#ef4444;
+      --liq1:#22c55e; --liq2:#06b6d4; /* ciecz */
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; color:var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial;
+      background: radial-gradient(1200px 800px at 70% -10%, #1f2937 0%, var(--bg) 60%);
+    }
+    header{ padding:28px 20px 8px; text-align:center}
+    header h1{margin:0 0 6px; font-size:clamp(22px,3vw,30px)}
+    header p{margin:0; color:var(--muted)}
+
+    .wrap{ max-width:1200px; margin:24px auto; padding:0 16px; display:grid; grid-template-columns:1.15fr 1fr; gap:22px }
+    @media (max-width:1000px){ .wrap{ grid-template-columns:1fr } }
+
+    .card{
+      background: linear-gradient(180deg,#0b1220 0%, var(--panel) 100%);
+      border:1px solid #1f2937; border-radius:14px; padding:18px;
+      box-shadow: 0 8px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03);
+    }
+    .card h2{ margin:0 0 12px; font-size:18px; color:#cbd5e1 }
+    .row{ display:flex; gap:10px; align-items:center; margin-bottom:10px; flex-wrap:wrap }
+    label{ min-width:140px; font-size:14px; color:#cbd5e1 }
+    input[type="number"]{
+      width:100%; padding:10px 12px; border-radius:10px; border:1px solid #273244; background:#0b1322; color:var(--text); outline:none;
+    }
+    input[type="number"]:focus{ border-color:#38577a; box-shadow:0 0 0 3px rgba(56,87,122,.25) }
+    .controls{ display:flex; gap:10px; flex-wrap:wrap; margin-top:8px }
+    button{
+      border:0; padding:10px 14px; border-radius:10px; color:#0b1220; font-weight:600; cursor:pointer;
+      transition: transform .04s ease, filter .2s ease;
+    }
+    button:active{ transform:translateY(1px) }
+    .btn-primary{ background: linear-gradient(180deg, #34d399 0%, #22c55e 100%); color:#052012 }
+    .btn-secondary{ background: linear-gradient(180deg, #67e8f9 0%, #06b6d4 100%); }
+    .btn-danger{ background: linear-gradient(180deg, #fca5a5 0%, #ef4444 100%); color:#250a0a }
+
+    /* Segmented (proste radio) */
+    .segmented{
+      display:inline-grid; grid-auto-flow:column; gap:8px; background:#0b1322; padding:6px; border-radius:12px; border:1px solid #273244;
+    }
+    .segmented input{ display:none }
+    .segmented label{
+      padding:8px 10px; border-radius:8px; border:1px solid transparent; cursor:pointer; color:#cbd5e1; user-select:none;
+    }
+    .segmented input:checked + label{
+      background: linear-gradient(180deg, #67e8f9 0%, #06b6d4 100%); color:#062226; font-weight:700;
+    }
+
+    /* KPI */
+    .kpis{ display:grid; grid-template-columns: repeat(3,1fr); gap:12px; margin-top:14px }
+    @media (max-width:700px){ .kpis{ grid-template-columns:1fr 1fr } }
+    .kpi{ background:#0b1322; border:1px solid #273244; border-radius:12px; padding:12px }
+    .kpi .label{ font-size:12px; color:var(--muted) }
+    .kpi .value{ font-size:22px; font-weight:700; letter-spacing:.2px; margin-top:6px }
+    .progress{ margin-top:16px; background:#0b1322; border:1px solid #273244; border-radius:12px; overflow:hidden; height:14px; box-shadow: inset 0 1px 0 rgba(255,255,255,.04) }
+    .bar{ height:100%; width:0%; background: linear-gradient(90deg, #22c55e, #06b6d4); transition:width .4s ease }
+
+    /* PRAWY PANEL – słoik z falami i monetami */
+    .visual{ display:grid; place-items:center; min-height:460px; position:relative }
+    .jar{ width:340px; height:420px; position:relative; filter: drop-shadow(0 16px 40px rgba(0,0,0,.55)); }
+    .shape{ position:absolute; inset:0;
+      -webkit-mask: path("M20 70 Q170 20 320 70 L320 380 Q170 410 20 380 Z");
+              mask: path("M20 70 Q170 20 320 70 L320 380 Q170 410 20 380 Z");
+      border-radius:28px;
+    }
+    .fill{
+      position:absolute; left:0; right:0; bottom:0; height:0%;
+      background: linear-gradient(180deg, var(--liq1), var(--liq2));
+      box-shadow: inset 0 6px 14px rgba(255,255,255,.08), inset 0 -12px 24px rgba(0,0,0,.35);
+      transition:height .6s cubic-bezier(.2,.7,.2,1);
+      overflow:hidden;
+    }
+    .fill::before, .fill::after{
+      content:""; position:absolute; left:0; right:0; height:26px; top:-18px; opacity:.95;
+      background-repeat: repeat-x; background-size: 220px 26px; filter: drop-shadow(0 3px 4px rgba(0,0,0,.15));
+    }
+    .fill::before{
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='26'><path d='M0,16 C30,8 60,24 90,16 C120,8 150,24 180,16 C200,11 210,14 220,16 L220,26 L0,26 Z' fill='%23ffffff30'/></svg>");
+      animation: wave1 6s linear infinite;
+    }
+    .fill::after{
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='26'><path d='M0,18 C30,10 60,26 90,18 C120,10 150,26 180,18 C200,13 210,16 220,18 L220,26 L0,26 Z' fill='%23ffffff24'/></svg>");
+      animation: wave2 9s linear infinite reverse;
+    }
+    @keyframes wave1{ from{ background-position:0 0 } to{ background-position:220px 0 } }
+    @keyframes wave2{ from{ background-position:0 0 } to{ background-position:220px 0 } }
+
+    .glass{
+      position:absolute; inset:0; pointer-events:none; border-radius:28px;
+      box-shadow: inset 0 0 0 3px rgba(147,197,253,.25), inset 0 30px 50px rgba(255,255,255,.05), inset 0 -20px 40px rgba(0,0,0,.25);
+      background:
+        radial-gradient(180px 260px at 80% 20%, rgba(255,255,255,.12), rgba(255,255,255,0) 60%),
+        radial-gradient(260px 180px at 20% 80%, rgba(255,255,255,.06), rgba(255,255,255,0) 60%);
+    }
+    .rim{
+      position:absolute; left:60px; right:60px; top:38px; height:24px; border-radius:12px;
+      background: linear-gradient(180deg, rgba(147,197,253,.25), rgba(147,197,253,.06));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 1px 0 rgba(0,0,0,.25);
+      pointer-events:none;
+    }
+
+    .coins{ position:absolute; inset:0; pointer-events:none; overflow:hidden }
+    .coin{
+      position:absolute; width:24px; height:24px;
+      background: radial-gradient(circle at 30% 30%, #fff8 6%, #f7d05a 20%, #dea200 65%, #a87000 100%);
+      border-radius:50%; border:1px solid #b37f00;
+      box-shadow: 0 5px 12px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.55);
+      animation: drop 1.2s ease forwards;
+    }
+    @keyframes drop{
+      0% { transform: translateY(-100px) rotate(-18deg) scale(.85); opacity:0 }
+      15%{ opacity:1 }
+      85%{ transform: translateY(300px) rotate(8deg) scale(1) }
+      100%{ transform: translateY(280px) rotate(0deg) scale(1); opacity:.95 }
+    }
+
+    .legend{ font-size:12px; color:var(--muted); text-align:center; margin-top:8px }
+    .mono{ font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Licznik zarobków – czas rzeczywisty + przyspieszacz</h1>
+    <p>Wprowadź stawkę (h/min/s), ustaw długość zmiany i ewentualny start od minuty. Suwak „Przyspieszenie” steruje szybkością symulacji.</p>
+  </header>
+
+  <div class="wrap">
+    <!-- LEWY PANEL (uprościłem) -->
+    <section class="card">
+      <h2>Ustawienia</h2>
+
+      <div class="row">
+        <label>Tryb stawki</label>
+        <div class="segmented" id="rateModeBox">
+          <input type="radio" name="rateMode" id="rm_h" value="h" checked><label for="rm_h">na godzinę</label>
+          <input type="radio" name="rateMode" id="rm_m" value="m"><label for="rm_m">na minutę</label>
+          <input type="radio" name="rateMode" id="rm_s" value="s"><label for="rm_s">na sekundę</label>
+        </div>
+      </div>
+
+      <div class="row">
+        <label for="rateVal">Stawka (PLN)</label>
+        <input type="number" id="rateVal" min="0" step="0.0001" value="45">
+      </div>
+
+      <div class="row">
+        <label for="hours">Długość zmiany (h)</label>
+        <input type="number" id="hours" min="0" step="0.25" value="8">
+      </div>
+
+      <div class="row">
+        <label for="minutesTotal">Minuty (opcjonalnie)</label>
+        <input type="number" id="minutesTotal" min="0" step="1" placeholder="np. 480">
+      </div>
+
+      <div class="row">
+        <label for="startMinute">Start od minuty</label>
+        <input type="number" id="startMinute" min="0" step="1" value="0">
+      </div>
+
+      <div class="row">
+        <label for="speed">Przyspieszenie</label>
+        <input type="range" id="speed" min="1" max="240" value="60" style="width:220px">
+        <span id="speedLabel" class="mono">60× (1 s = 1 min)</span>
+      </div>
+
+      <div class="controls">
+        <button class="btn-primary" id="startBtn">Start</button>
+        <button class="btn-secondary" id="pauseBtn" disabled>Pauza</button>
+        <button class="btn-danger" id="resetBtn">Restart</button>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi">
+          <div class="label">/ sekundę</div>
+          <div class="value mono"><span id="perSecond">0.000000</span> PLN</div>
+        </div>
+        <div class="kpi">
+          <div class="label">/ minutę</div>
+          <div class="value mono"><span id="perMinute">0.0000</span> PLN</div>
+        </div>
+        <div class="kpi">
+          <div class="label">/ godzinę</div>
+          <div class="value mono"><span id="perHour">0.00</span> PLN</div>
+        </div>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi">
+          <div class="label">Dziś narosło</div>
+          <div class="value mono"><span id="earned">0.00</span> PLN</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Czas pracy</div>
+          <div class="value mono"><span id="timeWorked">00:00:00</span> / <span id="timePlanned">00:00:00</span></div>
+        </div>
+        <div class="kpi">
+          <div class="label">% planu</div>
+          <div class="value mono"><span id="pct">0.0</span>%</div>
+        </div>
+      </div>
+
+      <div class="progress" aria-label="Procent zaplanowanej zmiany">
+        <div class="bar" id="progressBar"></div>
+      </div>
+
+      <p class="legend" style="margin-top:10px">
+        Wskazówka: 1× = czas rzeczywisty. 60× = 1 sekunda symuluje 1 minutę; 120× = 2 minuty na sekundę.
+      </p>
+    </section>
+
+    <!-- PRAWY PANEL – WIZUALIZACJA -->
+    <section class="card">
+      <h2>Wizualizacja</h2>
+      <div class="visual">
+        <div class="jar">
+          <div class="shape">
+            <div class="fill" id="jarFill"></div>
+            <div class="coins" id="coins"></div>
+            <div class="glass"></div>
+          </div>
+          <div class="rim"></div>
+        </div>
+        <div class="legend">Moneta wpada przy każdej pełnej minucie przepracowanej (liczonej z uwzględnieniem przyspieszenia).</div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    // --- Elementy UI
+    const rateModeBox  = document.getElementById('rateModeBox');
+    const rateValEl    = document.getElementById('rateVal');
+    const hoursEl      = document.getElementById('hours');
+    const minutesEl    = document.getElementById('minutesTotal');
+    const startMinEl   = document.getElementById('startMinute');
+    const speedEl      = document.getElementById('speed');
+    const speedLabelEl = document.getElementById('speedLabel');
+
+    const perSecEl   = document.getElementById('perSecond');
+    const perMinEl   = document.getElementById('perMinute');
+    const perHourEl  = document.getElementById('perHour');
+    const earnedEl   = document.getElementById('earned');
+    const timeWEl    = document.getElementById('timeWorked');
+    const timePEl    = document.getElementById('timePlanned');
+    const pctEl      = document.getElementById('pct');
+
+    const barEl   = document.getElementById('progressBar');
+    const fillEl  = document.getElementById('jarFill');
+    const coinsEl = document.getElementById('coins');
+
+    const startBtn = document.getElementById('startBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resetBtn = document.getElementById('resetBtn');
+
+    // --- Stan
+    let rafId = null;
+    let state = {
+      rateMode: 'h',        // 'h' | 'm' | 's'
+      rateVal: 45,          // liczba w wybranej jednostce
+      perSecond: 45/3600,   // PLN/s
+      minutesPlanned: 8*60,
+      startOffsetMs: 0,
+      startTimeMs: 0,       // performance.now() przy starcie
+      accumulatedMs: 0,     // zsumowane (z uwzględnieniem speedFactor)
+      running: false,
+      lastWholeMinute: -1,  // do monet
+      speedFactor: 60       // 1× = real time; 60× = 1s -> 1min
+    };
+
+    // --- Utils
+    const clamp = (n,min,max)=>Math.min(Math.max(n,min),max);
+    const pad2 = n => String(n).padStart(2,'0');
+    const fmtHMS = (ms)=>{
+      ms = Math.max(0, Math.floor(ms));
+      const s = Math.floor(ms/1000);
+      const hh = Math.floor(s/3600);
+      const mm = Math.floor((s%3600)/60);
+      const ss = s%60;
+      return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
+    };
+    const money2 = v => (Math.round(v*100)/100).toFixed(2);
+
+    function getRateMode(){
+      return rateModeBox.querySelector('input[name="rateMode"]:checked')?.value || 'h';
+    }
+
+    function computeRates(){
+      state.rateMode = getRateMode();
+      state.rateVal  = parseFloat(rateValEl.value || '0');
+
+      let perSecond = 0;
+      if (state.rateMode === 'h') perSecond = state.rateVal / 3600;
+      else if (state.rateMode === 'm') perSecond = state.rateVal / 60;
+      else perSecond = state.rateVal; // 's'
+
+      state.perSecond = Math.max(0, perSecond);
+
+      // KPI stawek
+      perSecEl.textContent  = (Math.round(state.perSecond*1e6)/1e6).toFixed(6);
+      perMinEl.textContent  = (Math.round(state.perSecond*60*1e4)/1e4).toFixed(4);
+      perHourEl.textContent = (Math.round(state.perSecond*3600*100)/100).toFixed(2);
+    }
+
+    function computePlan(){
+      computeRates();
+
+      let minutesPlanned = parseInt(minutesEl.value || '0',10);
+      if(!minutesPlanned){
+        const hours = parseFloat(hoursEl.value || '0');
+        minutesPlanned = Math.round(hours*60);
+      }
+      state.minutesPlanned = Math.max(0, minutesPlanned);
+      timePEl.textContent = fmtHMS(state.minutesPlanned*60_000);
+
+      const startMin = Math.max(0, parseInt(startMinEl.value || '0',10));
+      state.startOffsetMs = startMin*60_000;
+      state.accumulatedMs = state.startOffsetMs;
+      state.lastWholeMinute = Math.floor(startMin) - 1;
+
+      updateUI(performance.now());
+    }
+
+    function dropCoin(){
+      const left = 50 + Math.random()*240;
+      const coin = document.createElement('div');
+      coin.className = 'coin';
+      coin.style.left = left + 'px';
+      coin.style.top = '-60px';
+      coinsEl.appendChild(coin);
+      setTimeout(()=> coin.remove(), 1600);
+    }
+
+    function updateUI(now){
+      // klucz: uwzględniamy przyspieszenie w bieżącym odcinku
+      const elapsedMs = state.accumulatedMs + (state.running ? (now - state.startTimeMs)*state.speedFactor : 0);
+      const elapsedSec = elapsedMs / 1000;
+      const earned = elapsedSec * state.perSecond;
+
+      earnedEl.textContent = money2(earned);
+      timeWEl.textContent = fmtHMS(elapsedMs);
+
+      const plannedMs = state.minutesPlanned*60_000;
+      const pct = plannedMs>0 ? (elapsedMs/plannedMs)*100 : 0;
+      pctEl.textContent = (clamp(pct,0,100)).toFixed(1);
+      barEl.style.width = clamp(pct,0,100) + '%';
+      fillEl.style.height = clamp(pct,0,100) + '%';
+
+      const wholeMinute = Math.floor(elapsedMs / 60_000);
+      if (wholeMinute > state.lastWholeMinute){
+        for(let m = state.lastWholeMinute + 1; m <= wholeMinute; m++){
+          dropCoin();
+        }
+        state.lastWholeMinute = wholeMinute;
+      }
+
+      if (plannedMs>0 && elapsedMs >= plannedMs && state.running){
+        pause(); // auto-pauza przy osiągnięciu planu
+      }
+    }
+
+    function loop(now){
+      updateUI(now);
+      rafId = requestAnimationFrame(loop);
+    }
+
+    function start(){
+      if (state.running) return;
+      state.startTimeMs = performance.now();
+      state.running = true;
+      startBtn.disabled = true;
+      pauseBtn.disabled = false;
+      if (!rafId) rafId = requestAnimationFrame(loop);
+    }
+
+    function pause(){
+      if (!state.running) return;
+      const now = performance.now();
+      // dopisz bieżący odcinek z uwzględnieniem speedFactor
+      state.accumulatedMs += (now - state.startTimeMs)*state.speedFactor;
+      state.running = false;
+      startBtn.disabled = false;
+      pauseBtn.disabled = true;
+    }
+
+    function reset(){
+      if (rafId){ cancelAnimationFrame(rafId); rafId = null; }
+      state.running = false;
+      startBtn.disabled = false;
+      pauseBtn.disabled = true;
+      coinsEl.innerHTML = "";
+      computePlan();
+      if (!rafId) rafId = requestAnimationFrame(loop);
+    }
+
+    // Zmiana szybkości w locie: dokończ „stary odcinek”, potem zmień factor
+    function setSpeedFactor(f){
+      f = Math.max(1, Math.min(240, f|0));
+      if (state.running){
+        const now = performance.now();
+        state.accumulatedMs += (now - state.startTimeMs)*state.speedFactor; // dopisz z dotychczasową prędkością
+        state.startTimeMs = now; // zacznij kolejny odcinek z nową prędkością
+      }
+      state.speedFactor = f;
+      // etykieta
+      let txt = `${f}×`;
+      if (f===60) txt += " (1 s = 1 min)";
+      else if (f===1) txt += " (czas rzeczywisty)";
+      speedLabelEl.textContent = txt;
+    }
+
+    // --- Zdarzenia
+    rateModeBox.addEventListener('change', computePlan);
+    rateValEl.addEventListener('input', computePlan);
+    hoursEl.addEventListener('input', computePlan);
+    minutesEl.addEventListener('input', computePlan);
+    startMinEl.addEventListener('input', computePlan);
+
+    speedEl.addEventListener('input', (e)=> setSpeedFactor(parseInt(e.target.value,10)||1));
+
+    startBtn.addEventListener('click', start);
+    pauseBtn.addEventListener('click', pause);
+    resetBtn.addEventListener('click', reset);
+
+    // Init
+    computePlan();
+    setSpeedFactor(parseInt(speedEl.value,10));
+    rafId = requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
